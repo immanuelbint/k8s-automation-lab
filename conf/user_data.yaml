@@ -1,0 +1,26 @@
+#cloud-config
+# vim: syntax=yaml
+packages:
+  - python3.9
+hostname: ${hostname}
+fqdn: ${hostname}.${domain}
+prefer_fqdn_over_hostname: true
+ssh_pwauth: true
+disable_root: false
+chpasswd:
+  list: |
+    root:password
+  expire: false
+
+users:
+  - name: abint
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: users, admin
+    home: /home/apps
+    shell: /bin/bash
+    lock_passwd: true
+    ssh-authorized-keys: # list SSH Keys to authenticate
+      - <id-rsa-pub here...>
+
+runcmd:
+  - alternatives --set python3 /usr/bin/python3.9

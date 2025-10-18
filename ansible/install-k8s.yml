@@ -1,0 +1,106 @@
+- hosts: masters,workers
+  become: yes
+  tasks:
+    - name: create containerd configuration file
+      file:
+        path: /etc/modules-load.d/containerd.conf
+        state: touch
+
+    - name: set up containerd prerequisites
+      blockinfile:
+        path: /etc/modules-load.d/containerd.conf
+        block: |
+          overlay
+          br_netfilter
+
+    - name: load modules
+      shell: |
+        modprobe overlay
+        modprobe br_netfilter
+
+    - name: create network settings configuration file
+      file:
+        path: /etc/sysctl.d/99-kubernetes-cri.conf
+        state: touch
+
+    - name: set up containerd networking
+      blockinfile:
+        path: /etc/sysctl.d/99-kubernetes-cri.conf
+        block: |
+          net.bridge.bridge-nf-call-iptables = 1
+          net.ipv4.ip_forward = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+
+    - name: apply settings
+      command: sysctl --system
+
+    - name: add docker repository and install containerd
+      shell: |
+        dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+        dnf makecache
+        dnf install -y containerd.io
+        mkdir -p /etc/containerd
+        containerd config default | tee /etc/containerd/config.toml
+        systemctl enable --now containerd
+
+    - name: create k8s repo file
+      blockinfile:
+        path: /etc/yum.repos.d/kubernetes.repo
+        create: yes
+        block: |
+          [kubernetes]
+          name=Kubernetes
+          baseurl=https://pkgs.k8s.io/core:/stable:/v1.28/rpm/
+          enabled=1
+          gpgcheck=1
+          gpgkey=https://pkgs.k8s.io/core:/stable:/v1.28/rpm/repodata/repomd.xml.key
+
+    - name: install kubernetes
+      shell: |
+        dnf install -y kubelet kubeadm kubectl
+        systemctl enable --now kubelet
+        swapoff -a
+        sed -i '/ swap / s/^/#/' /etc/fstab
+
+- hosts: masters
+  become: yes
+  tasks:
+    - name: Initialize Kubernetes control plane
+      shell: kubeadm init --pod-network-cidr=10.244.0.0/16 --ignore-preflight-errors=NumCPU,SystemVerification,FileExisting-tc,Hostname
+    - name: Save join command
+      shell: kubeadm token create --print-join-command > /tmp/join.sh
+    - name: Set kubeconfig for root
+      shell: |
+        mkdir -p $HOME/.kube
+        cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+        chown $(id -u):$(id -g) $HOME/.kube/config
+    - name: Initialize network
+      shell: kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+    - name: Fetch join command to local
+      fetch:
+        src: /tmp/join.sh
+        dest: ./join_command.txt
+        flat: yes
+
+- hosts: workers
+  become: yes
+  tasks:
+    - name: Copy join command from local
+      copy:
+        src: ./join_command.txt
+        dest: /tmp/join.sh
+        mode: 0700
+    - name: Join Kubernetes cluster
+      shell: bash /tmp/join.sh
+
+- name: Distribute kubeconfig securely
+  hosts: developers
+  tasks:
+    - name: Copy kubeconfig to target user
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/{{ ansible_user }}/.kube/config
+        owner: "{{ ansible_user }}"
+        mode: '0600'
+    - name: Encrypt kubeconfig using ansible-vault
+      command: ansible-vault encrypt /home/{{ ansible_user }}/.kube/config
