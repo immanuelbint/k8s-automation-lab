@@ -185,12 +185,13 @@ workernode-1    Ready    <none>          8m    v1.30.0
 ![](resources/kubectl-nodes.png)
 
 
-## Notes
+## Notes and Future Improvement
 
 For complete variable and resource configuration, see:
 - [variable.tf](variable.tf)
 - [main.tf](main.tf)
 - [ansible/install-k8s.yml](ansible/install-k8s.yml)
+- Refactor the code for better readability
 
 ## References
 - [https://computingforgeeks.com/how-to-install-terraform-on-linux/](https://computingforgeeks.com/how-to-install-terraform-on-linux/)
